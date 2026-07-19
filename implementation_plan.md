@@ -1,6 +1,6 @@
 # GOTHAM (Geospatial Operations & Threat/Hotspot Analytics Machine)
 
-Build the KAVACH 2025 hackathon project: an advanced intelligence platform for Karnataka State Police with a FastAPI backend, React/Vite frontend, and PostGIS database. This is a deep intelligence engine, moving beyond a basic dashboard to provide probabilistic inference, network analytics, and behavioral profiling.
+Build the Datathon 2026 hackathon project: an advanced intelligence platform for Karnataka State Police with a FastAPI backend, React/Vite frontend, and PostGIS database. This is a deep intelligence engine, moving beyond a basic dashboard to provide probabilistic inference, network analytics, and behavioral profiling.
 
 ## User Review Required
 
