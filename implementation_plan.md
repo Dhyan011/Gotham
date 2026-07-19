@@ -1,14 +1,14 @@
-This is NOT a basic crime dashboard. GOTHAM is a deep intelligence 
-engine for Karnataka State Police (KSP) / SCRB, built for Datathon 2026.
+# GOTHAM - Geospatial Operations & Threat/Hotspot Analytics Machine
 
-The core philosophy: an investigator should be able to feed GOTHAM 
-the smallest fragment of information — a partial name, a vehicle 
-description, a location and time — and get back a ranked, 
-evidence-backed intelligence report connecting that fragment to 
-the full crime graph.
+> [!IMPORTANT]
+> This is NOT a basic crime dashboard. GOTHAM is a deep intelligence engine for Karnataka State Police (KSP) / SCRB, built for Datathon 2026.
 
-=== SYSTEM ARCHITECTURE ===
+**The Core Philosophy**: An investigator should be able to feed GOTHAM the smallest fragment of information — a partial name, a vehicle description, a location and time — and get back a ranked, evidence-backed intelligence report connecting that fragment to the full crime graph.
 
+## System Architecture
+
+### Backend (`gotham-backend/`)
+```text
 gotham-backend/
 ├── main.py
 ├── database.py
@@ -41,7 +41,10 @@ gotham-backend/
     ├── offenders.py
     ├── intelligence.py      # New: deep inference endpoints
     └── osint.py             # New: external enrichment endpoints
+```
 
+### Frontend (`gotham-frontend/`)
+```text
 gotham-frontend/
 ├── src/
 │   ├── pages/
@@ -59,11 +62,13 @@ gotham-frontend/
 │       ├── ConfidenceBar.jsx       # New: shows inference confidence
 │       ├── EvidenceTrail.jsx       # New: shows why a connection was made
 │       └── TemporalSlider.jsx      # New: scrub through time on graph
+```
 
-=== DATABASE SCHEMA (EXTENDED) ===
+## Database Schema (Extended)
 
--- All previous tables remain. Add these:
+*(All previous tables remain. Add these:)*
 
+```sql
 CREATE TABLE VehicleRecord (
   vehicle_id SERIAL PRIMARY KEY,
   registration_partial VARCHAR(20),  -- may be incomplete
@@ -135,55 +140,51 @@ CREATE TABLE OSINTRecord (
   relevance_score DECIMAL(3,2),
   fetched_at TIMESTAMP
 );
+```
 
-=== MODULE 1: ENTITY RESOLUTION ENGINE ===
+## Module 1: Entity Resolution Engine
+**File**: `intelligence/entity_resolution.py`
 
-File: intelligence/entity_resolution.py
+**Problem**: Investigator has partial information about a suspect. Input can be any combination of:
+- Partial name (phonetic variants)
+- Physical descriptors (height, build, marks)
+- Vehicle partial registration or description
+- Crime type + location + time window
+- Known associates
 
-Problem: Investigator has partial information about a suspect.
-Input can be any combination of:
-  - Partial name (phonetic variants)
-  - Physical descriptors (height, build, marks)
-  - Vehicle partial registration or description
-  - Crime type + location + time window
-  - Known associates
+### Algorithm Pipeline
 
-Algorithm pipeline:
+**Step 1 — Candidate Generation**
+For each input signal, independently query DB:
+- **Name**: use pg_trgm trigram similarity (threshold 0.3), also try Soundex + Metaphone phonetic matching
+- **Physical**: cosine similarity on descriptor vectors
+- **Vehicle**: fuzzy regex on partial registration
+- **Location+Time**: spatial query within radius + time window
+Each signal returns a candidate set with signal-specific scores.
 
-Step 1 — Candidate Generation
-  For each input signal, independently query DB:
-  - Name: use pg_trgm trigram similarity (threshold 0.3)
-    also try Soundex + Metaphone phonetic matching
-  - Physical: cosine similarity on descriptor vectors
-  - Vehicle: fuzzy regex on partial registration
-  - Location+Time: spatial query within radius + time window
-  Each signal returns a candidate set with signal-specific scores.
+**Step 2 — Evidence Fusion (Dempster-Shafer combination)**
+Combine evidence from multiple weak signals into a single belief score per candidate:
+`belief(candidate) = 1 - PRODUCT(1 - signal_score_i)` *(normalized across all candidates)*
+*This means: one strong signal OR multiple weak signals both raise belief. No single signal is required.*
 
-Step 2 — Evidence Fusion (Dempster-Shafer combination)
-  Combine evidence from multiple weak signals into a single
-  belief score per candidate:
-  
-  belief(candidate) = 1 - PRODUCT(1 - signal_score_i)
-                      normalized across all candidates
-  
-  This means: one strong signal OR multiple weak signals 
-  both raise belief. No single signal is required.
+**Step 3 — Ranking + Explanation**
+Return top 10 candidates with:
+- Overall confidence score (0-1)
+- Evidence breakdown: which signals matched and how strongly
+- Contradicting evidence: signals that do NOT match
+- Similar past cases linked to this candidate
 
-Step 3 — Ranking + Explanation
-  Return top 10 candidates with:
-  - Overall confidence score (0-1)
-  - Evidence breakdown: which signals matched and how strongly
-  - Contradicting evidence: signals that do NOT match
-  - Similar past cases linked to this candidate
+**Implementation Notes:**
+- Install: `pip install python-levenshtein metaphone`
+- Use psycopg2 for pg_trgm queries
+- Build descriptor feature vectors with sklearn
 
-Implementation:
-  Install: pip install python-levenshtein metaphone
-  Use psycopg2 for pg_trgm queries
-  Build descriptor feature vectors with sklearn
+### API Endpoint
+`POST /api/intelligence/resolve`
 
-API endpoint:
-POST /api/intelligence/resolve
-Body: {
+**Body:**
+```json
+{
   "partial_name": "Rajan K",
   "physical": {"marks": ["scar left cheek"], "build": "medium"},
   "vehicle": {"type": "motorcycle", "color": "red"},
@@ -191,7 +192,11 @@ Body: {
   "time_window": {"from": "2024-11-01", "to": "2024-11-30"},
   "crime_type": "Chain Snatching"
 }
-Response: {
+```
+
+**Response:**
+```json
+{
   "candidates": [
     {
       "accused_id": 47,
@@ -210,475 +215,250 @@ Response: {
     }
   ]
 }
+```
 
-=== MODULE 2: DEEP GRAPH ANALYTICS ENGINE ===
-
-File: graph_engine/algorithms.py
+## Module 2: Deep Graph Analytics Engine
+**File**: `graph_engine/algorithms.py`
 
 Build a NetworkX MultiDiGraph where:
-  Nodes: Accused, Victim, Location, CaseMaster, Unit
-  Edges: 
-    accused→case (INVOLVED_IN, weight=severity)
-    accused→accused (CO_ACCUSED, weight=shared_case_count)
-    accused→location (OPERATES_AT, weight=frequency)
-    case→location (OCCURRED_AT)
-    victim→case (VICTIMIZED_IN)
-    location→location (ADJACENT, weight=distance_km)
+- **Nodes**: Accused, Victim, Location, CaseMaster, Unit
+- **Edges**: 
+  - accused→case (INVOLVED_IN, weight=severity)
+  - accused→accused (CO_ACCUSED, weight=shared_case_count)
+  - accused→location (OPERATES_AT, weight=frequency)
+  - case→location (OCCURRED_AT)
+  - victim→case (VICTIMIZED_IN)
+  - location→location (ADJACENT, weight=distance_km)
 
-Algorithm 1: Weighted PageRank
-  Purpose: Find most INFLUENTIAL nodes in criminal network
-  (not most arrested — the organizer who appears less but connects more)
-  
-  nx.pagerank(G, weight='weight', alpha=0.85)
-  
-  Interpret: High PageRank accused = network hub = likely organizer
-  Store results in GraphMetrics table.
+**Algorithm 1: Weighted PageRank**
+- **Purpose**: Find most INFLUENTIAL nodes in criminal network (not most arrested — the organizer who appears less but connects more)
+- `nx.pagerank(G, weight='weight', alpha=0.85)`
+- **Interpret**: High PageRank accused = network hub = likely organizer. Store results in GraphMetrics table.
 
-Algorithm 2: Betweenness Centrality
-  Purpose: Find BROKERS — accused who connect otherwise separate groups
-  These are key targets: removing them fragments the network.
-  
-  nx.betweenness_centrality(G, weight='weight', normalized=True)
-  
-  Visualize: nodes sized by betweenness score in Cytoscape
+**Algorithm 2: Betweenness Centrality**
+- **Purpose**: Find BROKERS — accused who connect otherwise separate groups. These are key targets: removing them fragments the network.
+- `nx.betweenness_centrality(G, weight='weight', normalized=True)`
+- **Visualize**: nodes sized by betweenness score in Cytoscape
 
-Algorithm 3: Community Detection (Louvain)
-  Purpose: Automatically identify GANG CLUSTERS without manual tagging
-  
-  Install: pip install python-louvain
-  import community as community_louvain
-  
-  Convert to undirected for Louvain:
+**Algorithm 3: Community Detection (Louvain)**
+- **Purpose**: Automatically identify GANG CLUSTERS without manual tagging
+- **Install**: `pip install python-louvain` (`import community as community_louvain`)
+- Convert to undirected for Louvain:
+  ```python
   G_undirected = G.to_undirected()
   partition = community_louvain.best_partition(G_undirected)
-  
-  Each community = potential gang or organized crime group
-  Color-code communities in Cytoscape visualization
-  Compute community statistics: size, dominant crime type, geographic spread
+  ```
+- Each community = potential gang or organized crime group. Color-code communities in Cytoscape visualization. Compute community statistics: size, dominant crime type, geographic spread.
 
-Algorithm 4: Link Prediction
-  Purpose: Infer PROBABLE connections not yet in the database
-  Use Jaccard coefficient + Adamic-Adar index on accused nodes:
-  
-  For each pair of accused NOT directly connected:
-    jaccard = |common_neighbors| / |union_neighbors|
-    adamic_adar = sum(1/log(degree(n)) for n in common_neighbors)
-    
-  Flag pairs with high scores as InferredLink records
-  Threshold: jaccard > 0.3 OR adamic_adar > 1.5
-  
-  These show up in UI as dashed edges: "Probable connection - not confirmed"
+**Algorithm 4: Link Prediction**
+- **Purpose**: Infer PROBABLE connections not yet in the database. Use Jaccard coefficient + Adamic-Adar index on accused nodes:
+  - For each pair of accused NOT directly connected:
+    - `jaccard = |common_neighbors| / |union_neighbors|`
+    - `adamic_adar = sum(1/log(degree(n)) for n in common_neighbors)`
+  - Flag pairs with high scores as InferredLink records.
+  - Threshold: `jaccard > 0.3 OR adamic_adar > 1.5`
+- These show up in UI as dashed edges: "Probable connection - not confirmed"
 
-Algorithm 5: Temporal Graph Analysis
-  File: graph_engine/temporal.py
-  
-  Build separate graph snapshots per quarter (2022Q1 ... 2024Q4)
-  Track per accused across snapshots:
-    - degree growth rate (accelerating = escalating criminal activity)
-    - new community memberships (gang switching / expansion)
-    - geographic spread increase (fleeing or expanding)
-  
-  API: GET /api/network/temporal/{accused_id}
-  Returns: time series of network metrics per quarter
-  Frontend: TemporalSlider.jsx — drag to replay network evolution
+**Algorithm 5: Temporal Graph Analysis**
+- **File**: `graph_engine/temporal.py`
+- Build separate graph snapshots per quarter (2022Q1 ... 2024Q4). Track per accused across snapshots:
+  - degree growth rate (accelerating = escalating criminal activity)
+  - new community memberships (gang switching / expansion)
+  - geographic spread increase (fleeing or expanding)
+- **API**: `GET /api/network/temporal/{accused_id}`
+- **Returns**: time series of network metrics per quarter
+- **Frontend**: `TemporalSlider.jsx` — drag to replay network evolution
 
-=== MODULE 3: BEHAVIORAL SEQUENCE INTELLIGENCE ===
-
-File: intelligence/behavioral.py
+## Module 3: Behavioral Sequence Intelligence
+**File**: `intelligence/behavioral.py`
 
 For each accused with 3+ prior offenses, compute:
 
-Step 1 — Crime Sequence Extraction
-  Order all linked FIRs by date_of_occurrence
-  Extract: [crime_type_1, crime_type_2, ..., crime_type_n]
-  Extract: [days_gap_1, days_gap_2, ..., days_gap_n-1]
+**Step 1 — Crime Sequence Extraction**
+- Order all linked FIRs by `date_of_occurrence`
+- Extract: `[crime_type_1, crime_type_2, ..., crime_type_n]`
+- Extract: `[days_gap_1, days_gap_2, ..., days_gap_n-1]`
 
-Step 2 — Escalation Detection
-  Assign severity weights: Theft=2, Fraud=3, Assault=4, 
-                           Dacoity=6, Murder=9, Cybercrime=3
-  Compute linear regression slope on severity over time
-  escalation_score = slope * recency_weight
-  If slope > 0.5: flagged as ESCALATING offender
+**Step 2 — Escalation Detection**
+- Assign severity weights: Theft=2, Fraud=3, Assault=4, Dacoity=6, Murder=9, Cybercrime=3
+- Compute linear regression slope on severity over time. `escalation_score = slope * recency_weight`
+- If slope > 0.5: flagged as ESCALATING offender
 
-Step 3 — Next Crime Prediction (N-gram Markov chain)
-  Build transition matrix from ALL offender histories in DB:
-  P(next_crime | last_two_crimes)
-  
-  For each accused: predict most likely next crime type
-  Store in CrimeSequence.next_predicted_crime
-  
-  Example output:
-  "Based on sequence [Theft → Assault → Assault], 
-   predicted next: Dacoity (confidence: 0.67)"
+**Step 3 — Next Crime Prediction (N-gram Markov chain)**
+- Build transition matrix from ALL offender histories in DB: `P(next_crime | last_two_crimes)`
+- For each accused: predict most likely next crime type. Store in `CrimeSequence.next_predicted_crime`
+- **Example output**: *"Based on sequence [Theft → Assault → Assault], predicted next: Dacoity (confidence: 0.67)"*
 
-Step 4 — Rhythm Analysis
-  Average time gap between offenses = personal recidivism rhythm
-  If last_offense was X days ago and X > avg_gap * 1.5:
-    → "Overdue" flag: may be planning next offense
-  If time gaps are decreasing:
-    → "Accelerating" flag: increasing frequency
+**Step 4 — Rhythm Analysis**
+- Average time gap between offenses = personal recidivism rhythm
+- If `last_offense` was X days ago and `X > avg_gap * 1.5`: → **"Overdue"** flag: may be planning next offense
+- If time gaps are decreasing: → **"Accelerating"** flag: increasing frequency
 
-Step 5 — MO Drift Detection
-  Compare MO tags between first half and second half of history
-  Significant change = learning/adapting criminal
-  Flag: "MO drift detected — methods changing since 2023"
+**Step 5 — MO Drift Detection**
+- Compare MO tags between first half and second half of history
+- Significant change = learning/adapting criminal
+- Flag: *"MO drift detected — methods changing since 2023"*
 
-API: GET /api/intelligence/behavioral/{accused_id}
-Returns: {
-  sequence, escalation_score, escalation_flag,
-  next_predicted_crime, prediction_confidence,
-  recidivism_rhythm_days, rhythm_flag,
-  mo_drift_detected, mo_drift_description
+### API Endpoint
+`GET /api/intelligence/behavioral/{accused_id}`
+**Returns:**
+```json
+{
+  "sequence": [],
+  "escalation_score": 0.0,
+  "escalation_flag": false,
+  "next_predicted_crime": "",
+  "prediction_confidence": 0.0,
+  "recidivism_rhythm_days": 0,
+  "rhythm_flag": "",
+  "mo_drift_detected": false,
+  "mo_drift_description": ""
 }
+```
 
-=== MODULE 4: MULTI-SIGNAL ANOMALY DETECTION ===
+## Module 4: Multi-Signal Anomaly Detection
+**File**: `analytics/anomaly.py`
 
-File: analytics/anomaly.py
+- **Signal 1: Statistical (Z-score)** — already designed
+  - `z = (current_30d - rolling_mean_6m) / rolling_std_6m`
+  - Flag if `z > 2.0`
+- **Signal 2: Isolation Forest (sklearn)**
+  - Features per FIR: `[hour_of_day, day_of_week, lat, lng, severity_weight, victim_age, accused_count]`
+  - Train `IsolationForest(contamination=0.05)` on historical data
+  - Score each new FIR: anomaly_score ∈ [-1, 1]. Flag if score < -0.3 as anomalous incident
+- **Signal 3: Graph Anomaly**
+  - Monitor accused node degree over rolling 30-day window
+  - Flag if degree increase > 2 std deviations above personal baseline. Meaning: accused suddenly appearing in many new cases = active spree
+- **Signal 4: Spatio-temporal Co-occurrence**
+  - Flag when: unusual crime type + unusual location + unusual time all occur together simultaneously
+  - Use 3D kernel density estimation (`scipy.stats.gaussian_kde`) on (lat, lng, hour_of_day) space
 
-Signal 1: Statistical (Z-score) — already designed
-  z = (current_30d - rolling_mean_6m) / rolling_std_6m
-  Flag if z > 2.0
+**Fusion**: Combine all 4 signals per incident
+- `combined_anomaly_score = weighted_average(signal_scores)`
+- `weights = [0.25, 0.30, 0.25, 0.20]`
+- Alert levels:
+  - score > 0.8: **CRITICAL**
+  - score > 0.6: **HIGH**
+  - score > 0.4: **MEDIUM**
 
-Signal 2: Isolation Forest (sklearn)
-  Features per FIR: [hour_of_day, day_of_week, lat, lng, 
-                     severity_weight, victim_age, accused_count]
-  Train IsolationForest(contamination=0.05) on historical data
-  Score each new FIR: anomaly_score ∈ [-1, 1]
-  Flag if score < -0.3 as anomalous incident
-
-Signal 3: Graph Anomaly
-  Monitor accused node degree over rolling 30-day window
-  Flag if degree increase > 2 std deviations above personal baseline
-  Meaning: accused suddenly appearing in many new cases = active spree
-
-Signal 4: Spatio-temporal Co-occurrence
-  Flag when: unusual crime type + unusual location + unusual time 
-             all occur together simultaneously
-  Use 3D kernel density estimation (scipy.stats.gaussian_kde)
-  on (lat, lng, hour_of_day) space
-
-Fusion: Combine all 4 signals per incident
-  combined_anomaly_score = weighted_average(signal_scores)
-  weights = [0.25, 0.30, 0.25, 0.20]
-  Alert levels:
-    score > 0.8: CRITICAL
-    score > 0.6: HIGH  
-    score > 0.4: MEDIUM
-
-API: GET /api/alerts/anomalies
+### API Endpoint
+`GET /api/alerts/anomalies`
 Returns alerts with full signal breakdown:
-  "This incident is anomalous because:
-   [CRITICAL] Z-score 3.2 in chain snatching for Bengaluru North
-   [HIGH] Isolation Forest flags unusual victim profile
-   [MEDIUM] Graph: accused degree spiked 4x this week"
+> "This incident is anomalous because:
+> [CRITICAL] Z-score 3.2 in chain snatching for Bengaluru North
+> [HIGH] Isolation Forest flags unusual victim profile
+> [MEDIUM] Graph: accused degree spiked 4x this week"
 
-=== MODULE 5: OSINT ENRICHMENT LAYER ===
-
-File: intelligence/osint.py
+## Module 5: OSINT Enrichment Layer
+**File**: `intelligence/osint.py`
 
 Connect to these external sources at ingestion + on-demand:
 
-Source 1: OpenStreetMap (Overpass API)
-  For each crime location, query OSM within 500m radius:
-  - ATMs, banks (financial crime risk)
-  - Schools, colleges (vulnerable victim zones)  
-  - Bars, liquor shops (assault correlation)
-  - Bus stands, railway stations (chain snatching, pickpocket zones)
-  - Industrial areas (theft patterns)
-  
-  API call (free, no key needed):
-  https://overpass-api.de/api/interpreter
-  Query: [out:json]; node(around:500,{lat},{lng})[amenity]; out;
-  
-  Enrich LocationEntity.crime_affinity with venue context
-  UI: hovering a crime cluster shows "Near 3 ATMs, 1 school"
+**Source 1: OpenStreetMap (Overpass API)**
+- For each crime location, query OSM within 500m radius: ATMs/banks, Schools/colleges, Bars/liquor shops, Bus stands/railway stations, Industrial areas.
+- API call (free, no key needed): `https://overpass-api.de/api/interpreter`
+- Query: `[out:json]; node(around:500,{lat},{lng})[amenity]; out;`
+- Enrich `LocationEntity.crime_affinity` with venue context. UI: hovering a crime cluster shows "Near 3 ATMs, 1 school"
 
-Source 2: eCourts Public API
-  https://ecourts.gov.in/ecourts_home/
-  Search by accused name for public court records
-  Match conviction history to supplement internal records
-  Flag: "3 court records found matching this accused"
+**Source 2: eCourts Public API**
+- `https://ecourts.gov.in/ecourts_home/`
+- Search by accused name for public court records to match conviction history.
 
-Source 3: News Correlation (NewsAPI or RSS)
-  For each FIR date + district, search local Kannada/English news
-  Look for: coverage of same incident, named suspects, 
-             linked events, political context
-  
-  Free: use RSS feeds from Deccan Herald, Times of India Karnataka
-  Parse with feedparser library
-  Store matched articles in OSINTRecord
+**Source 3: News Correlation (NewsAPI or RSS)**
+- For each FIR date + district, search local Kannada/English news (RSS feeds from Deccan Herald, Times of India Karnataka).
+- Look for coverage of same incident, named suspects, linked events. Parse with `feedparser`.
 
-Source 4: Synthetic Social Graph Inference
-  Since real social media APIs are restricted, build inference:
-  Co-location pattern: two accused appearing near same location
-  within 2 hours on 3+ separate occasions → infer association
-  Time-correlation: crimes happening in coordinated time windows
-  across districts → infer gang coordination signal
+**Source 4: Synthetic Social Graph Inference**
+- Build inference: Co-location pattern (two accused appearing near same location within 2 hours on 3+ separate occasions → infer association) and Time-correlation (crimes happening in coordinated time windows across districts → infer gang coordination signal).
 
-All OSINT results:
-  - Clearly labeled with source and confidence
-  - Never presented as confirmed fact
-  - Always shown as "External signal — unverified"
+*All OSINT results are clearly labeled with source and confidence, never presented as confirmed fact, and always shown as "External signal — unverified".*
 
-API: POST /api/osint/enrich/{fir_id}
-     GET /api/osint/accused/{accused_id}
+**API Endpoints:**
+- `POST /api/osint/enrich/{fir_id}`
+- `GET /api/osint/accused/{accused_id}`
 
-=== MODULE 6: PREDICTIVE CRIME FORECASTING ===
+## Module 6: Predictive Crime Forecasting
+**File**: `analytics/prediction.py`
 
-File: analytics/prediction.py
+**Model 1: Spatial Crime Forecast**
+- **Features**: `[district, crime_type, month, day_of_week, local_event_flag, historical_count_same_period]`
+- **Model**: Random Forest Regressor (sklearn)
+- **Output**: predicted_incident_count per (district, crime_type, week). Display as "Expected incidents next 7 days" overlay on map.
 
-Model 1: Spatial Crime Forecast
-  Features: [district, crime_type, month, day_of_week, 
-             local_event_flag, historical_count_same_period]
-  Model: Random Forest Regressor (sklearn)
-  Output: predicted_incident_count per (district, crime_type, week)
-  
-  Train on 2022-2023 data, validate on 2024 data
-  Display as "Expected incidents next 7 days" overlay on map
+**Model 2: Repeat Offense Prediction**
+- **Features per accused**: `[days_since_last_offense, total_offenses, escalation_score, avg_time_gap, community_size, betweenness_rank]`
+- **Model**: Gradient Boosting Classifier (sklearn)
+- **Output**: P(reoffend within 30 days) per accused. Flag top 10 highest-probability as "Imminent Risk" list on Command Center.
 
-Model 2: Repeat Offense Prediction
-  Features per accused: [days_since_last_offense, total_offenses,
-                          escalation_score, avg_time_gap, 
-                          community_size, betweenness_rank]
-  Model: Gradient Boosting Classifier (sklearn)
-  Output: P(reoffend within 30 days) per accused
-  
-  Flag top 10 highest-probability as "Imminent Risk" list
-  Show on Command Center as priority watchlist
+**Model 3: Hotspot Emergence Prediction**
+- For each spatial grid cell (0.1° × 0.1°): Compute trend (is crime count increasing over last 4 weeks?). Use linear regression slope as emergence score.
+- Map overlay: "Emerging zones" shown as orange gradient (separate from established hotspots).
 
-Model 3: Hotspot Emergence Prediction  
-  For each spatial grid cell (0.1° × 0.1°):
-    Compute trend: is crime count increasing over last 4 weeks?
-    Use linear regression slope as emergence score
-  
-  Map overlay: "Emerging zones" shown as orange gradient 
-  Separate from existing hotspots (established) vs. 
-  emerging zones (new, may need preemptive deployment)
+**API Endpoints:**
+- `GET /api/predictions/hotspots?weeks_ahead=2`
+- `GET /api/predictions/reoffense`
+- `GET /api/predictions/emergence`
 
-API: GET /api/predictions/hotspots?weeks_ahead=2
-     GET /api/predictions/reoffense
-     GET /api/predictions/emergence
+## Frontend Pages
 
-=== FRONTEND: INTELLIGENCE QUERY PAGE ===
-
-File: src/pages/IntelligenceQuery.jsx
-
-This is GOTHAM's most powerful interface.
+### Intelligence Query Page
+**File**: `src/pages/IntelligenceQuery.jsx`
 An investigator enters ANY fragment of information.
 
-UI Layout:
-  Left panel: Input form with all optional fields:
-    - Partial name (text)
-    - Physical description (checkboxes + text)
-    - Vehicle (dropdowns + partial plate text)
-    - Location (map click or address)
-    - Date/time range (pickers)
-    - Crime type (multiselect)
-    - Known associates (add multiple)
-    - Free text (anything else)
-  
-  Right panel: Results, loading state, then:
-    - Ranked candidate list with confidence bars (ConfidenceBar.jsx)
-    - Each candidate expandable: shows evidence breakdown
-    - "Why this match?" button → EvidenceTrail.jsx modal
-      shows exactly which signals matched and their weights
-    - OSINT enrichment button per candidate
-    - "Investigate" button → opens Network Graph centered on this node
+**UI Layout:**
+- **Left panel**: Input form with all optional fields (Partial name, Physical description, Vehicle, Location, Date/time range, Crime type, Known associates, Free text)
+- **Right panel**: Ranked candidate list with confidence bars (`ConfidenceBar.jsx`). 
+- **EvidenceTrail.jsx Modal**: Visual flowchart showing inference chain.
+  - *[Input: red Pulsar motorcycle] → matches VehicleRecord #47 (confidence 0.75) → linked to FIR/2024/MYS/0231 → accused_id 103 (Rajanna K) → Rajanna has 3 prior chain snatching cases → 2 of those in same 5km radius as input location. OVERALL CONFIDENCE: 0.87*
 
-EvidenceTrail.jsx:
-  Visual flowchart showing inference chain:
-  [Input: red Pulsar motorcycle] 
-      → matches VehicleRecord #47 (confidence 0.75)
-      → linked to FIR/2024/MYS/0231 
-      → accused_id 103 (Rajanna K)
-      → Rajanna has 3 prior chain snatching cases
-      → 2 of those in same 5km radius as input location
-  OVERALL CONFIDENCE: 0.87
+### Gang Analysis Page
+**File**: `src/pages/GangAnalysis.jsx`
+Visualizes Louvain community detection results.
 
-=== FRONTEND: GANG ANALYSIS PAGE ===
+- **Left panel**: Community list showing ID, size, dominant crime type, centroid, highest PageRank member, highest betweenness member, timeline of growth.
+- **Right panel**: Full graph colored by community. Node size = betweenness centrality, Node brightness = PageRank score, Dashed edges = InferredLink.
+- **Clicking a community**: Shows community intelligence report (e.g., *"Community C4: 12 members, primarily Dacoity, active in Coastal belt since Q3 2023, Probable organizer: Ramesh D, Key broker: Suresh N"*).
 
-File: src/pages/GangAnalysis.jsx
-
-Visualizes Louvain community detection results:
-  
-  Left panel: Community list
-    Each community shows:
-    - Auto-generated ID + size
-    - Dominant crime type
-    - Geographic centroid
-    - Highest PageRank member (likely organizer)
-    - Highest betweenness member (likely broker)
-    - Timeline of community growth
-  
-  Right panel: Full graph colored by community
-    Each community = distinct color
-    Node size = betweenness centrality
-    Node brightness = PageRank score
-    Dashed edges = InferredLink (not confirmed)
-    
-  Clicking a community:
-    - Highlights all its nodes
-    - Shows side panel with community intelligence report:
-      "Community C4: 12 members, primarily Dacoity, 
-       active in Coastal belt since Q3 2023,
-       Probable organizer: Ramesh D (PageRank rank: #1)
-       Key broker: Suresh N (Betweenness rank: #1, connects C4 to C7)"
-    - Button: "Generate Intelligence Brief" → 
-      calls LLM to write a paragraph-format report on this community
-
-=== SYNTHETIC DATA: DEEP SEEDING ===
-
+## Synthetic Data: Deep Seeding
 Beyond basic 500 FIRs, seed these specific patterns:
 
-Gang Alpha (Community detection target):
-  8 accused, linked through 15 FIRs, Dacoity + Assault
-  Active in Coastal belt (Mangaluru, Udupi, Kundapur)
-  Two members have high betweenness — they're the brokers
-  One member appears in only 2 cases but connects to 6 others
-  (high PageRank, low visibility = the organizer pattern)
+- **Gang Alpha (Community detection target)**: 8 accused, linked through 15 FIRs, Dacoity + Assault. Active in Coastal belt. Two brokers, one organizer.
+- **Gang Beta (Cybercrime network)**: 5 accused, Bengaluru Urban + one in Hubballi (broker). Crime type: Cybercrime + Fraud. Time pattern: only on weekdays, 10am-4pm.
+- **Repeat Offender "Rajan"**: 7 cases, escalating severity (Theft → Assault → Dacoity). Predicted next: Dacoity. Has 2 physical descriptor records across different FIRs.
+- **Entity Resolution Test Case**: Seed a "John Doe" (unknown suspect). Physical: "tall, thin build, scar right hand, yellow shirt". Vehicle: "blue motorcycle, partial plate KA-05". Should match Accused #77 "Janardhan K" with confidence 0.79.
+- **Temporal Evolution Seed**: Gang Alpha starts as 3 members in 2022Q1. Grows to 8 members by 2023Q3. Member #4 joins mid-2022.
 
-Gang Beta (Cybercrime network):
-  5 accused, Bengaluru Urban + one in Hubballi (broker)
-  Crime type: Cybercrime + Fraud
-  Time pattern: crimes only on weekdays, 10am-4pm (working hours pattern)
-  Deliberate MO pattern in BriefFacts text
-
-Repeat Offender "Rajan":
-  7 cases, escalating severity: Theft → Assault → Dacoity
-  Predicted next: Dacoity (for demo)
-  Has 2 physical descriptor records across different FIRs
-  (for entity resolution demo with slightly inconsistent descriptions)
-
-Entity Resolution Test Case:
-  Seed a "John Doe" in FIR — no accused_id yet (unknown suspect)
-  Physical: "tall, thin build, scar right hand, yellow shirt"
-  Vehicle: "blue motorcycle, partial plate KA-05"
-  When investigator runs resolve: should match Accused #77 "Janardhan K"
-  with confidence 0.79 and show 3 evidence signals
-
-Temporal Evolution Seed:
-  Gang Alpha starts as 3 members in 2022Q1
-  Grows to 8 members by 2023Q3 (for temporal slider demo)
-  Member #4 joins mid-2022 (betweenness jumps at that point)
-
-=== EXPLAINABILITY REQUIREMENTS ===
-
+## Explainability Requirements
 Every single AI/ML output MUST include an explanation layer:
 
-Risk Score: Not just "87/100 HIGH" but:
-  "Prior offenses: 7 cases (score: 38/40)
-   Avg severity: 6.2/10 (score: 22/30)
-   Recency: last offense 23 days ago (score: 18/20)
-   Geographic spread: 3 districts (score: 9/10)
-   TOTAL: 87/100"
+- **Risk Score**: *"Prior offenses: 7 cases (score: 38/40)... TOTAL: 87/100"*
+- **Anomaly Alert**: *"Z-score: 3.2... Isolation Forest: anomaly score -0.61... Graph: Rajan's degree increased... Combined signal: 0.84 — CRITICAL"*
+- **Predicted Link**: *"Probable connection between Ramesh D and Suresh N: 3 common associates (Jaccard: 0.45)... NOT CONFIRMED"*
+- **Community Assignment**: *"Placed in Community C4 because: 8 of 12 direct connections are C4 members..."*
 
-Anomaly Alert: Not just "CRITICAL ALERT" but:
-  "Z-score: 3.2 (chain snatching count 14 vs. baseline 4.2)
-   Isolation Forest: anomaly score -0.61 (unusual victim age pattern)
-   Graph: Rajan's degree increased from 2 to 8 this week
-   Combined signal: 0.84 — CRITICAL"
+## Coding Standards
+- Every module has standalone `__main__` test that can run independently.
+- All DB queries use parameterized statements (no string interpolation).
+- Graph is rebuilt from DB at startup + can be triggered via `POST /api/admin/rebuild-graph`.
+- All ML models serialized with joblib after first training run, loaded from disk on subsequent starts.
+- Every API response includes metadata (data_source, algorithm_used, computed_at, confidence_note).
+- `inference.py` logs every link inference with full evidence trail to InferredLink table.
 
-Predicted Link: Not just a dashed edge but:
-  "Probable connection between Ramesh D and Suresh N:
-   3 common associates (Jaccard: 0.45)
-   Same location appears in both case histories (4 times)
-   Adamic-Adar score: 2.3
-   NOT CONFIRMED — investigate to verify"
+## What Makes This Genuinely Hard
+1. **Entity resolution under uncertainty** (Dempster-Shafer probabilistic multi-signal fusion)
+2. **Link prediction** (Jaccard + Adamic-Adar surface probable unknown connections)
+3. **Temporal graph evolution** (animate network growth, detect structural changes)
+4. **Behavioral sequence prediction** (Markov chain on crime types)
+5. **Community detection** (Louvain automatic gang discovery)
+6. **Multi-signal anomaly fusion** (4-signal fusion with weighted confidence)
+7. **OSINT enrichment** (External venue context enriches every crime location)
+8. **Explainability everywhere** (Output the reasoning chain behind every number)
 
-Community Assignment: Not just a color but:
-  "Placed in Community C4 because:
-   8 of 12 direct connections are C4 members
-   Geographic centroid matches community centroid
-   Crime type alignment: Dacoity (matches C4 dominant type)"
-
-=== CODING STANDARDS ===
-
-- Every module has standalone __main__ test that can run independently
-- All DB queries use parameterized statements (no string interpolation)
-- Graph is rebuilt from DB at startup + can be triggered via 
-  POST /api/admin/rebuild-graph
-- All ML models serialized with joblib after first training run,
-  loaded from disk on subsequent starts
-- Every API response includes:
-  {
-    "data": {...},
-    "metadata": {
-      "data_source": "GOTHAM Synthetic Dataset v1.0 — Simulated",
-      "algorithm_used": "DBSCAN eps=0.05",
-      "computed_at": "2024-11-15T14:23:11Z",
-      "confidence_note": "Based on 47 matching records"
-    }
-  }
-- inference.py logs every link inference with full evidence trail
-  to InferredLink table for audit purposes
-
-=== WHAT MAKES THIS GENUINELY HARD ===
-
-The features that separate this from every other team's submission:
-
-1. Entity resolution under uncertainty (Dempster-Shafer)
-   Most teams: exact name match only
-   GOTHAM: probabilistic multi-signal fusion from partial data
-
-2. Link prediction (Jaccard + Adamic-Adar)
-   Most teams: show known connections
-   GOTHAM: surface probable unknown connections with confidence
-
-3. Temporal graph evolution
-   Most teams: static network snapshot
-   GOTHAM: animate network growth over time, detect structural changes
-
-4. Behavioral sequence prediction (Markov chain on crime types)
-   Most teams: count past crimes
-   GOTHAM: predict next crime type from sequence pattern
-
-5. Community detection (Louvain)
-   Most teams: manual gang tagging
-   GOTHAM: automatic gang discovery from graph structure alone
-
-6. Multi-signal anomaly fusion
-   Most teams: single z-score threshold
-   GOTHAM: 4-signal fusion with weighted confidence
-
-7. OSINT enrichment (OSM Overpass API)
-   Most teams: internal data only
-   GOTHAM: external venue context enriches every crime location
-
-8. Explainability everywhere
-   Most teams: output a number
-   GOTHAM: output the reasoning chain behind every number
-
-=== DEMO FLOW (UPGRADED) ===
-
-90-second to 3-minute extended demo:
-
-[0:00] Command Center loads
-  → 3 critical alerts visible, watchlist shows "Rajan: 0.84 reoffense probability"
-
-[0:20] Intelligence Query page
-  → Investigator types: "male, scar right hand, blue motorcycle KA-05, 
-    chain snatching near Jayanagar, November 2024"
-  → GOTHAM returns: "Janardhan K — confidence 0.87"
-  → Expand evidence trail: shows exactly why
-
-[0:50] Click "Investigate" → Network Graph
-  → Janardhan's 2-hop network loads
-  → Community detection color shows he's in Community C4
-  → A dashed edge appears: "Probable link to Ramesh D — not confirmed"
-  → Node sizes show Ramesh D is the PageRank #1 (organizer)
-
-[1:20] Gang Analysis page
-  → C4 highlighted: 8 members, Coastal belt, Dacoity dominant
-  → Temporal slider dragged back to 2022: only 3 members visible
-  → Slide forward: watch gang grow, broker node appears in mid-2022
-
-[1:50] Offender Profile: Rajan
-  → Behavioral sequence: Theft → Assault → Dacoity × 3
-  → "Next predicted: Dacoity (67% confidence)"
-  → "Rhythm: avg 47 days between offenses. Last offense: 61 days ago. OVERDUE."
-  → MO drift: "Methods shifted post-2023: now uses vehicle"
-
-[2:20] Hotspot Map
-  → Predictive overlay active: "2 emerging zones next 7 days"
-  → Mangaluru cluster pulsing: C4 territory + high anomaly score
-  → OSM enrichment: "cluster is within 500m of 4 ATMs and 1 bus stand"
+## Demo Flow (Upgraded)
+**90-second to 3-minute extended demo:**
+- `[0:00]` **Command Center loads** → 3 critical alerts visible, watchlist shows "Rajan: 0.84 reoffense probability".
+- `[0:20]` **Intelligence Query page** → Investigator types: "male, scar right hand, blue motorcycle KA-05, chain snatching near Jayanagar, November 2024" → GOTHAM returns: "Janardhan K — confidence 0.87" → Expand evidence trail shows exactly why.
+- `[0:50]` **Click "Investigate" → Network Graph** → Janardhan's 2-hop network loads → Community detection color shows C4 → Probable link to Ramesh D appears → Node sizes show Ramesh D is the PageRank #1 (organizer).
+- `[1:20]` **Gang Analysis page** → C4 highlighted → Temporal slider dragged back to 2022 (only 3 members) → Slide forward to watch gang grow.
+- `[1:50]` **Offender Profile: Rajan** → Behavioral sequence shown (Predicted next: Dacoity) → Rhythm flag: OVERDUE → MO drift flagged.
+- `[2:20]` **Hotspot Map** → Predictive overlay active (2 emerging zones) → Mangaluru cluster pulsing (C4 territory) → OSM enrichment shows nearby ATMs.
