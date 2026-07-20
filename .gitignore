@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+*.egg
+.env
+venv/
+.venv/
+
+# Data (generated, not committed)
+gotham-backend/data/
+
+# ML models
+*.joblib
+*.pkl
+
+# Node
+node_modules/
+gotham-frontend/node_modules/
+gotham-frontend/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
