@@ -1,9 +1,10 @@
 version: '3.8'
 
 services:
-  db:
-    image: postgis/postgis:15-3.4
-    container_name: gotham_db
+  # 1. PostgreSQL + PostGIS (Core 23-table schema)
+  postgres:
+    image: postgis/postgis:15-3.3
+    container_name: gotham_postgres
     environment:
       POSTGRES_USER: gotham
       POSTGRES_PASSWORD: gotham_password
@@ -14,12 +15,56 @@ services:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
 
-  gremlin-server:
-    image: tinkerpop/gremlin-server:3.7.1
-    container_name: gotham_gremlin
+  # 2. Neo4j Graph Database (with Graph Data Science plugin)
+  neo4j:
+    image: neo4j:5.16.0
+    container_name: gotham_neo4j
+    environment:
+      NEO4J_AUTH: neo4j/gotham_graph_pass
+      NEO4J_PLUGINS: '["graph-data-science", "apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: gds.*,apoc.*
     ports:
-      - "8182:8182"
+      - "7474:7474" # HTTP Browser
+      - "7687:7687" # Bolt protocol
+    volumes:
+      - neo4j_data:/data
+    restart: unless-stopped
+
+  # 3. Elasticsearch (Full-text & Fuzzy search)
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+    container_name: gotham_elastic
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false # Disabled for dev/hackathon
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elastic_data:/usr/share/elasticsearch/data
+    restart: unless-stopped
+
+  # 4. Apache Kafka (Event Streaming / Real-time ingestion)
+  # Using KRaft mode (no Zookeeper needed)
+  kafka:
+    image: bitnami/kafka:3.7.0
+    container_name: gotham_kafka
+    environment:
+      - KAFKA_CFG_NODE_ID=1
+      - KAFKA_CFG_PROCESS_ROLES=broker,controller
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka_data:/bitnami/kafka
     restart: unless-stopped
 
 volumes:
   postgres_data:
+  neo4j_data:
+  elastic_data:
+  kafka_data:

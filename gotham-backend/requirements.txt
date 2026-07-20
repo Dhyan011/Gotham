@@ -1,3 +1,4 @@
+# Core API & Database
 fastapi==0.109.2
 uvicorn==0.27.1
 sqlalchemy==2.0.25
@@ -6,14 +7,21 @@ psycopg2-binary==2.9.9
 pydantic==2.6.1
 pydantic-settings==2.1.0
 
+# Enterprise Databases & Streams
+neo4j==5.16.0
+elasticsearch==8.12.0
+kafka-python==2.0.2
+
 # Spark & Machine Learning
 pyspark==3.5.0
 scikit-learn==1.4.0
+xgboost==2.0.3
+prophet==1.1.5
 pandas==2.2.0
 numpy==1.26.4
 
-# Graph Engine
-gremlinpython==3.7.1
+# Entity Resolution
+rapidfuzz==3.6.1
 
-# Unstructured Data Ingestion
+# Unstructured Data Ingestion (Generative AI Layer support)
 unstructured==0.12.3

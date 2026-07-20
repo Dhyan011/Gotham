@@ -1,145 +1,251 @@
 import os
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Date, Numeric, Text, Boolean, JSON, ForeignKey, ARRAY
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, Date, DateTime, ForeignKey, Text
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+from sqlalchemy.schema import Table
 
+# Database Setup
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://gotham:gotham_password@localhost:5432/gotham_db")
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+# =====================================================================
+# KSP OFFICIAL ER DIAGRAM SCHEMA (23 Tables + Junctions)
+# =====================================================================
+
+class State(Base):
+    __tablename__ = "State"
+    StateID = Column(Integer, primary_key=True)
+    StateName = Column(String)
+    NationalityID = Column(Integer)
+    Active = Column(Boolean, default=True)
+
+class District(Base):
+    __tablename__ = "District"
+    DistrictID = Column(Integer, primary_key=True)
+    DistrictName = Column(String)
+    StateID = Column(Integer, ForeignKey("State.StateID"))
+    Active = Column(Boolean, default=True)
+
+class UnitType(Base):
+    __tablename__ = "UnitType"
+    UnitTypeID = Column(Integer, primary_key=True)
+    UnitTypeName = Column(String)
+    CityDistState = Column(String)
+
 class Unit(Base):
-    __tablename__ = 'unit'
-    unit_id = Column(Integer, primary_key=True, index=True)
-    unit_name = Column(String(100))
-    district = Column(String(100))
-    lat = Column(Numeric(9, 6))
-    lng = Column(Numeric(9, 6))
+    __tablename__ = "Unit"
+    UnitID = Column(Integer, primary_key=True)
+    UnitName = Column(String)
+    TypeID = Column(Integer, ForeignKey("UnitType.UnitTypeID"))
+    ParentUnit = Column(Integer, ForeignKey("Unit.UnitID"), nullable=True)
+    NationalityID = Column(Integer)
+    StateID = Column(Integer, ForeignKey("State.StateID"))
+    DistrictID = Column(Integer, ForeignKey("District.DistrictID"))
+    Active = Column(Boolean, default=True)
 
+class Court(Base):
+    __tablename__ = "Court"
+    CourtID = Column(Integer, primary_key=True)
+    CourtName = Column(String)
+    DistrictID = Column(Integer, ForeignKey("District.DistrictID"))
+    StateID = Column(Integer, ForeignKey("State.StateID"))
+    Active = Column(Boolean, default=True)
+
+class Rank(Base):
+    __tablename__ = "Rank"
+    RankID = Column(Integer, primary_key=True)
+    RankName = Column(String)
+    Hierarchy = Column(Integer)
+    Active = Column(Boolean, default=True)
+
+class Designation(Base):
+    __tablename__ = "Designation"
+    DesignationID = Column(Integer, primary_key=True)
+    DesignationName = Column(String)
+    Active = Column(Boolean, default=True)
+    SortOrder = Column(Integer)
+
+class Employee(Base):
+    __tablename__ = "Employee"
+    EmployeeID = Column(Integer, primary_key=True)
+    DistrictID = Column(Integer, ForeignKey("District.DistrictID"))
+    UnitID = Column(Integer, ForeignKey("Unit.UnitID"))
+    RankID = Column(Integer, ForeignKey("Rank.RankID"))
+    DesignationID = Column(Integer, ForeignKey("Designation.DesignationID"))
+    KGID = Column(String)
+    FirstName = Column(String)
+    EmployeeDOB = Column(Date)
+    GenderID = Column(Integer)
+    BloodGroupID = Column(Integer)
+    PhysicallyChallenged = Column(Boolean)
+    AppointmentDate = Column(Date)
+
+class CrimeHead(Base):
+    __tablename__ = "CrimeHead"
+    CrimeHeadID = Column(Integer, primary_key=True)
+    CrimeGroupName = Column(String)
+    Active = Column(Boolean, default=True)
+
+class CrimeSubHead(Base):
+    __tablename__ = "CrimeSubHead"
+    CrimeSubHeadID = Column(Integer, primary_key=True)
+    CrimeHeadID = Column(Integer, ForeignKey("CrimeHead.CrimeHeadID"))
+    CrimeHeadName = Column(String)
+    SeqID = Column(Integer)
+
+class CaseCategory(Base):
+    __tablename__ = "CaseCategory"
+    CaseCategoryID = Column(Integer, primary_key=True)
+    CategoryName = Column(String)
+
+class GravityOffence(Base):
+    __tablename__ = "GravityOffence"
+    GravityOffenceID = Column(Integer, primary_key=True)
+    LookupValue = Column(String)
+
+class CaseStatusMaster(Base):
+    __tablename__ = "CaseStatusMaster"
+    CaseStatusID = Column(Integer, primary_key=True)
+    CaseStatusName = Column(String)
+
+class CasteMaster(Base):
+    __tablename__ = "CasteMaster"
+    caste_master_id = Column(Integer, primary_key=True)
+    caste_master_name = Column(String)
+
+class ReligionMaster(Base):
+    __tablename__ = "ReligionMaster"
+    ReligionID = Column(Integer, primary_key=True)
+    ReligionName = Column(String)
+
+class OccupationMaster(Base):
+    __tablename__ = "OccupationMaster"
+    OccupationID = Column(Integer, primary_key=True)
+    OccupationName = Column(String)
+
+class Act(Base):
+    __tablename__ = "Act"
+    ActCode = Column(String, primary_key=True)
+    ActDescription = Column(String)
+    ShortName = Column(String)
+    Active = Column(Boolean, default=True)
+
+class Section(Base):
+    __tablename__ = "Section"
+    # Composite PK handling by making a unique surrogate or just mapping properly
+    SectionID = Column(Integer, primary_key=True, autoincrement=True)
+    ActCode = Column(String, ForeignKey("Act.ActCode"))
+    SectionCode = Column(String)
+    SectionDescription = Column(String)
+    Active = Column(Boolean, default=True)
+
+# ── Core CaseMaster Table ──
 class CaseMaster(Base):
-    __tablename__ = 'casemaster'
-    fir_id = Column(Integer, primary_key=True, index=True)
-    fir_number = Column(String(50))
-    unit_id = Column(Integer, ForeignKey('unit.unit_id'))
-    crime_type = Column(String(100))
-    crime_subtype = Column(String(100))
-    date_of_occurrence = Column(DateTime)
-    date_reported = Column(DateTime)
-    lat = Column(Numeric(9, 6))
-    lng = Column(Numeric(9, 6))
-    brief_facts = Column(Text)
-    status = Column(String(50))
-    severity_weight = Column(Integer)
-    mo_tags = Column(ARRAY(Text))
-    summary = Column(Text)
+    __tablename__ = "CaseMaster"
+    CaseMasterID = Column(Integer, primary_key=True)
+    CrimeNo = Column(String)
+    CaseNo = Column(String)
+    CrimeRegisteredDate = Column(Date)
+    PolicePersonID = Column(Integer, ForeignKey("Employee.EmployeeID"))
+    PoliceStationID = Column(Integer, ForeignKey("Unit.UnitID"))
+    CaseCategoryID = Column(Integer, ForeignKey("CaseCategory.CaseCategoryID"))
+    GravityOffenceID = Column(Integer, ForeignKey("GravityOffence.GravityOffenceID"))
+    CrimeMajorHeadID = Column(Integer, ForeignKey("CrimeHead.CrimeHeadID"))
+    CrimeMinorHeadID = Column(Integer, ForeignKey("CrimeSubHead.CrimeSubHeadID"))
+    CaseStatusID = Column(Integer, ForeignKey("CaseStatusMaster.CaseStatusID"))
+    CourtID = Column(Integer, ForeignKey("Court.CourtID"), nullable=True)
+    
+    IncidentFromDate = Column(DateTime)
+    IncidentToDate = Column(DateTime)
+    InfoReceivedPSDate = Column(DateTime)
+    latitude = Column(Float)
+    longitude = Column(Float)
+    BriefFacts = Column(Text)
 
-class Accused(Base):
-    __tablename__ = 'accused'
-    accused_id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100))
-    dob = Column(Date)
-    gender = Column(String(20))
-    address = Column(Text)
-    district = Column(String(100))
-    risk_score = Column(Numeric(4, 2))
-    risk_label = Column(String(20))
-    prior_offense_count = Column(Integer)
-    mo_pattern = Column(ARRAY(Text))
+class ActSectionAssociation(Base):
+    __tablename__ = "ActSectionAssociation"
+    AssocID = Column(Integer, primary_key=True, autoincrement=True)
+    CaseMasterID = Column(Integer, ForeignKey("CaseMaster.CaseMasterID"))
+    ActID = Column(String, ForeignKey("Act.ActCode"))
+    SectionID = Column(Integer, ForeignKey("Section.SectionID"))
+    ActOrderID = Column(Integer)
+    SectionOrderID = Column(Integer)
 
-class CaseAccused(Base):
-    __tablename__ = 'caseaccused'
-    fir_id = Column(Integer, ForeignKey('casemaster.fir_id'), primary_key=True)
-    accused_id = Column(Integer, ForeignKey('accused.accused_id'), primary_key=True)
-    role = Column(String(50))
+class ComplainantDetails(Base):
+    __tablename__ = "ComplainantDetails"
+    ComplainantID = Column(Integer, primary_key=True)
+    CaseMasterID = Column(Integer, ForeignKey("CaseMaster.CaseMasterID"))
+    ComplainantName = Column(String)
+    AgeYear = Column(Integer)
+    OccupationID = Column(Integer, ForeignKey("OccupationMaster.OccupationID"))
+    ReligionID = Column(Integer, ForeignKey("ReligionMaster.ReligionID"))
+    CasteID = Column(Integer, ForeignKey("CasteMaster.caste_master_id"))
+    GenderID = Column(Integer)
 
 class Victim(Base):
-    __tablename__ = 'victim'
-    victim_id = Column(Integer, primary_key=True, index=True)
-    fir_id = Column(Integer, ForeignKey('casemaster.fir_id'))
-    name = Column(String(100))
-    age = Column(Integer)
-    gender = Column(String(20))
-    address = Column(Text)
-    occupation = Column(String(100))
+    __tablename__ = "Victim"
+    VictimMasterID = Column(Integer, primary_key=True)
+    CaseMasterID = Column(Integer, ForeignKey("CaseMaster.CaseMasterID"))
+    VictimName = Column(String)
+    AgeYear = Column(Integer)
+    GenderID = Column(Integer)
+    VictimPolice = Column(String)
+
+class Accused(Base):
+    __tablename__ = "Accused"
+    AccusedMasterID = Column(Integer, primary_key=True)
+    CaseMasterID = Column(Integer, ForeignKey("CaseMaster.CaseMasterID"))
+    AccusedName = Column(String)
+    AgeYear = Column(Integer)
+    GenderID = Column(Integer)
+    PersonID = Column(String) # E.g., A1, A2 for sorting
 
 class ArrestSurrender(Base):
-    __tablename__ = 'arrestsurrender'
-    arrest_id = Column(Integer, primary_key=True, index=True)
-    accused_id = Column(Integer, ForeignKey('accused.accused_id'))
-    fir_id = Column(Integer, ForeignKey('casemaster.fir_id'))
-    arrest_date = Column(DateTime)
-    arrest_type = Column(String(50))
+    __tablename__ = "ArrestSurrender"
+    ArrestSurrenderID = Column(Integer, primary_key=True)
+    CaseMasterID = Column(Integer, ForeignKey("CaseMaster.CaseMasterID"))
+    ArrestSurrenderTypeID = Column(Integer)
+    ArrestSurrenderDate = Column(Date)
+    ArrestSurrenderStateId = Column(Integer, ForeignKey("State.StateID"))
+    ArrestSurrenderDistrictId = Column(Integer, ForeignKey("District.DistrictID"))
+    PoliceStationID = Column(Integer, ForeignKey("Unit.UnitID"))
+    IOID = Column(Integer, ForeignKey("Employee.EmployeeID"))
+    CourtID = Column(Integer, ForeignKey("Court.CourtID"))
+    AccusedMasterID = Column(Integer, ForeignKey("Accused.AccusedMasterID"))
+    IsAccused = Column(Boolean)
+    IsComplainantAccused = Column(Boolean)
 
-class VehicleRecord(Base):
-    __tablename__ = 'vehiclerecord'
-    vehicle_id = Column(Integer, primary_key=True, index=True)
-    registration_partial = Column(String(20))
-    vehicle_type = Column(String(50))
-    color = Column(String(30))
-    make = Column(String(50))
-    fir_id = Column(Integer, ForeignKey('casemaster.fir_id'))
-    confidence = Column(Numeric(3, 2))
+# Junction for multiple accused per arrest event
+inv_arrestsurrenderaccused = Table('inv_arrestsurrenderaccused', Base.metadata,
+    Column('ArrestSurrenderID', Integer, ForeignKey('ArrestSurrender.ArrestSurrenderID')),
+    Column('AccusedMasterID', Integer, ForeignKey('Accused.AccusedMasterID'))
+)
 
-class PhysicalDescriptor(Base):
-    __tablename__ = 'physicaldescriptor'
-    descriptor_id = Column(Integer, primary_key=True, index=True)
-    accused_id = Column(Integer, ForeignKey('accused.accused_id'))
-    height_cm = Column(Integer)
-    build = Column(String(30))
-    distinguishing_marks = Column(ARRAY(Text))
-    approximate_age_at_filing = Column(Integer)
-    source_fir_id = Column(Integer, ForeignKey('casemaster.fir_id'))
 
-class LocationEntity(Base):
-    __tablename__ = 'locationentity'
-    location_id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(200))
-    location_type = Column(String(50))
-    lat = Column(Numeric(9, 6))
-    lng = Column(Numeric(9, 6))
-    osm_id = Column(Integer)
-    crime_affinity = Column(JSON)
+# =====================================================================
+# GOTHAM ANALYTICS LAYER (Custom extensions for AI/Graph)
+# =====================================================================
 
-class CrimeSequence(Base):
-    __tablename__ = 'crimesequence'
-    sequence_id = Column(Integer, primary_key=True, index=True)
-    accused_id = Column(Integer, ForeignKey('accused.accused_id'))
-    ordered_crime_types = Column(ARRAY(Text))
-    time_gaps_days = Column(ARRAY(Integer))
-    escalation_score = Column(Numeric(4, 2))
-    next_predicted_crime = Column(String(100))
-    prediction_confidence = Column(Numeric(3, 2))
+class GOTHAM_ResolvedPerson(Base):
+    """
+    Generated by RapidFuzz Entity Resolution. Unifies multiple AccusedMasterID 
+    rows into a single entity to feed into the Neo4j graph.
+    """
+    __tablename__ = "GOTHAM_ResolvedPerson"
+    person_id = Column(Integer, primary_key=True, autoincrement=True)
+    resolved_name = Column(String)
+    risk_score = Column(Float, default=0.0)
+    mo_pattern_tags = Column(String) # Comma separated
+    primary_district = Column(Integer, ForeignKey("District.DistrictID"))
 
-class GraphMetrics(Base):
-    __tablename__ = 'graphmetrics'
-    metric_id = Column(Integer, primary_key=True, index=True)
-    entity_type = Column(String(20))
-    entity_id = Column(Integer)
-    pagerank_score = Column(Numeric(8, 6))
-    betweenness_centrality = Column(Numeric(8, 6))
-    community_id = Column(Integer)
-    computed_at = Column(DateTime)
+class GOTHAM_Person_Accused_Map(Base):
+    """Junction mapping the resolved person to their raw FIR accused entries."""
+    __tablename__ = "GOTHAM_Person_Accused_Map"
+    map_id = Column(Integer, primary_key=True, autoincrement=True)
+    person_id = Column(Integer, ForeignKey("GOTHAM_ResolvedPerson.person_id"))
+    AccusedMasterID = Column(Integer, ForeignKey("Accused.AccusedMasterID"))
 
-class InferredLink(Base):
-    __tablename__ = 'inferredlink'
-    link_id = Column(Integer, primary_key=True, index=True)
-    entity_a_type = Column(String(20))
-    entity_a_id = Column(Integer)
-    entity_b_type = Column(String(20))
-    entity_b_id = Column(Integer)
-    inference_reason = Column(ARRAY(Text))
-    confidence = Column(Numeric(3, 2))
-    confirmed = Column(Boolean, default=False)
-    created_at = Column(DateTime)
-
-class OSINTRecord(Base):
-    __tablename__ = 'osintrecord'
-    osint_id = Column(Integer, primary_key=True, index=True)
-    fir_id = Column(Integer, ForeignKey('casemaster.fir_id'))
-    source = Column(String(100))
-    raw_data = Column(JSON)
-    extracted_entities = Column(JSON)
-    relevance_score = Column(Numeric(3, 2))
-    fetched_at = Column(DateTime)
 
 def create_tables():
     Base.metadata.create_all(bind=engine)
@@ -150,7 +256,3 @@ def get_db():
         yield db
     finally:
         db.close()
-
-if __name__ == "__main__":
-    create_tables()
-    print("Tables created successfully.")
