@@ -9,10 +9,14 @@ from datetime import datetime, timedelta
 from database import SessionLocal, Person, FIR, Vehicle, Location, BankAccount, PersonFIRMap, CaseManagement, create_tables
 from neo4j import GraphDatabase
 import numpy as np
+from sentence_transformers import SentenceTransformer
 
-# Hardcoded vectors for demo semantic search (mock embeddings)
-def mock_embedding():
-    return np.random.rand(384).tolist()
+# Load the model once
+print("Loading sentence-transformer model (this may take a moment)...")
+embedder = SentenceTransformer('all-MiniLM-L6-v2')
+
+def get_embedding(text: str):
+    return embedder.encode(text).tolist()
 
 def seed_postgres():
     db = SessionLocal()
@@ -40,21 +44,23 @@ def seed_postgres():
     db.commit()
 
     # 4. FIRs (The Golden Demo Target: FIR-1245)
+    f1_desc = "Masked men escaped in a White SUV after robbing a jewelry store near MG Road."
     f1 = FIR(
         crime_no="FIR-1245", 
         date_registered=datetime.now() - timedelta(days=2),
         crime_type="Armed Robbery",
-        description="Masked men escaped in a White SUV after robbing a jewelry store near MG Road.",
+        description=f1_desc,
         location_id=mg_road.id,
-        embedding=mock_embedding()
+        embedding=get_embedding(f1_desc)
     )
+    f2_desc = "Business owner threatened by two men near Indiranagar. Suspects fled in a white SUV."
     f2 = FIR(
         crime_no="FIR-1246",
         date_registered=datetime.now() - timedelta(days=15),
         crime_type="Extortion",
-        description="Business owner threatened by two men near Indiranagar. Suspects fled in a white SUV.",
+        description=f2_desc,
         location_id=indiranagar.id,
-        embedding=mock_embedding()
+        embedding=get_embedding(f2_desc)
     )
     db.add_all([f1, f2])
     db.commit()

@@ -1,0 +1,12 @@
+{
+  "client": {
+    "source": "client",
+    "build_path": "dist"
+  },
+  "appsails": [
+    {
+      "name": "backend_service",
+      "source": "backend_service"
+    }
+  ]
+}

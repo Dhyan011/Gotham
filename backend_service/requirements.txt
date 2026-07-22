@@ -1,0 +1,7 @@
+# Core API
+fastapi==0.109.2
+uvicorn==0.27.1
+pydantic==2.6.1
+
+# Data processing
+pandas==2.2.0
